@@ -55,7 +55,7 @@ Required positional arguments:
 Optional argument:
 
 - `--output`: Path where the compressed file will be saved.
-- `--seed`: Random seed used for reproducible noise generation. Defaults to `42`.
+- `--seed`: Random seed used for reproducible noise generation. Defaults to `26`.
 
 ### Arguments
 
@@ -65,7 +65,9 @@ The script accepts the following command-line arguments:
 - `algorithm` (positional): Compression algorithm to use. Choose `PNG` or `WebP` (case-insensitive).
 - `noise_level` (positional): Noise level to apply. Choose `low` or `high`.
 - `--output` (optional): Path to save the resulting compressed image. If omitted, the compressed bytes are not saved to disk.
-- `--seed` (optional): Integer seed for deterministic noise sampling and Gaussian noise generation. If omitted, the script uses `42`.
+- `--seed` (optional): Integer seed for deterministic noise sampling and Gaussian noise generation. If omitted, the script uses `26`.
+
+The script prints JSON output with explicit units. Compressed sizes include raw `bytes` plus derived `kB` and `MB` values, and noise/response values include `%`.
 
 Examples:
 

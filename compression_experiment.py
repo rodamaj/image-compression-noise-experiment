@@ -10,6 +10,18 @@ from PIL import Image
 DEFAULT_RANDOM_SEED = 26
 
 
+def bytes_to_kb(num_bytes):
+    """Convert a byte count to kilobytes using base-10 units."""
+
+    return num_bytes / 1000
+
+
+def bytes_to_mb(num_bytes):
+    """Convert a byte count to megabytes using base-10 units."""
+
+    return num_bytes / 1_000_000
+
+
 def get_noise_percentage(noise_level, rng):
     """Sample a noise percentage from the configured range for a noise tier."""
 
@@ -87,12 +99,28 @@ def run_experiment(image_path, algorithm, noise_level, output=None, seed=DEFAULT
         output_path.write_bytes(noisy_compressed_image)
 
     return {
-        "baseline_compressed_size": baseline_compressed_size,
-        "noisy_compressed_size": noisy_compressed_size,
-        "response": response,
+        "baseline_compressed_size": {
+            "value": baseline_compressed_size,
+            "unit": "bytes",
+            "kB": bytes_to_kb(baseline_compressed_size),
+            "MB": bytes_to_mb(baseline_compressed_size),
+        },
+        "noisy_compressed_size": {
+            "value": noisy_compressed_size,
+            "unit": "bytes",
+            "kB": bytes_to_kb(noisy_compressed_size),
+            "MB": bytes_to_mb(noisy_compressed_size),
+        },
+        "response": {
+            "value": response,
+            "unit": "%",
+        },
         "algorithm": "WebP" if algorithm.upper() == "WEBP" else "PNG",
         "noise_level": noise_level,
-        "noise_percentage": noise_percentage,
+        "noise_percentage": {
+            "value": noise_percentage,
+            "unit": "%",
+        },
         "seed": seed,
     }
 
