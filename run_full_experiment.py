@@ -131,20 +131,20 @@ def main():
                     algorithm,
                     noise_level,
                 )
-                result = run_condition(
-                    experiment_image,
-                    algorithm=algorithm,
-                    noise_level=noise_level,
-                    seed=seed,
-                )
+                try:
+                    result = run_condition(
+                        experiment_image,
+                        algorithm=algorithm,
+                        noise_level=noise_level,
+                        seed=seed,
+                    )
+                except ValueError as error:
+                    parser.error(str(error))
 
                 if args.save_compressed_outputs:
                     compressed_output_path = (
                         output_dir
                         / "compressed_outputs"
-                        / record["content_block"]
-                        / algorithm.lower()
-                        / noise_level
                         / build_output_name(
                             image_path.stem,
                             record["content_block"],

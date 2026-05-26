@@ -2,38 +2,51 @@ PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 RSCRIPT ?= Rscript
 
-CSV ?= RAISE_1k.csv
+empty :=
+space := $(empty) $(empty)
+comma := ,
+
+CSV ?= RAISE_6k.csv
 IMAGE_DIR ?= images
-DOWNLOAD_DIR ?= raise_tiffs_4928x3264
-OUTPUT_DIR ?= experiment_outputs
-REPS_PER_BLOCK ?= 0
+DOWNLOAD_DIR ?= $(IMAGE_DIR)
+OUTPUT_DIR ?= results
+ALGORITHMS ?= PNG WEBP
+NOISE_LEVELS ?= low high
+CONTENT_BLOCKS ?= indoor outdoor
+REPS_PER_BLOCK ?= 1
 SEED ?= 26
 TREATMENT_ORDER_FILE ?= treatment_order.csv
 PLAN_FILE ?=
 PLAN_OUTPUT ?= experiment_plan.csv
 SAVE_OUTPUTS ?= 0
 
-.PHONY: help install treatment-order plan download run full pipeline
+.PHONY: help install treatmentorder plan download run experiment pipeline
 
 help:
 	@echo "Available targets:"
 	@echo "  make install"
-	@echo "  make treatment-order [TREATMENT_ORDER_FILE=treatment_order.csv] [REPS_PER_BLOCK=10] [SEED=26]"
+	@echo "  make treatmentorder [TREATMENT_ORDER_FILE=treatment_order.csv] [ALGORITHMS='PNG WEBP'] [NOISE_LEVELS='low high'] [CONTENT_BLOCKS='indoor outdoor'] [REPS_PER_BLOCK=1] [SEED=26]"
 	@echo "  make plan [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [SEED=26]"
-	@echo "  make download PLAN_FILE=experiment_plan.csv [DOWNLOAD_DIR=raise_tiffs_4928x3264]"
-	@echo "  make full PLAN_FILE=experiment_plan.csv [IMAGE_DIR=images] [OUTPUT_DIR=experiment_outputs] [SEED=26]"
-	@echo "  make pipeline [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [REPS_PER_BLOCK=10] [SEED=26]"
-	@echo "  make run    # alias of make full"
+	@echo "  make download PLAN_FILE=experiment_plan.csv [DOWNLOAD_DIR=images]"
+	@echo "  make experiment PLAN_FILE=experiment_plan.csv [IMAGE_DIR=images] [OUTPUT_DIR=results] [SEED=26]"
+	@echo "  make pipeline [OUTPUT_DIR=results] [IMAGE_DIR=images] [DOWNLOAD_DIR=images] [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [ALGORITHMS='PNG WEBP'] [NOISE_LEVELS='low high'] [CONTENT_BLOCKS='indoor outdoor'] [REPS_PER_BLOCK=1] [SEED=26] [SAVE_OUTPUTS=1]"
+	@echo "  make run    # alias of make experiment"
 	@echo "Optional flag:"
 	@echo "  SAVE_OUTPUTS=1   Save compressed noisy outputs to disk"
 	@echo "  TREATMENT_ORDER_FILE=treatment_order.csv   CSV generated from R for treatment order"
-	@echo "  REPS_PER_BLOCK=10   In treatment-order/pipeline: repetitions per treatment in R"
+	@echo "  REPS_PER_BLOCK=1   Repetitions per treatment in the randomized treatment order"
 
 install:
 	$(PIP) install -r requirements.txt
 
-treatment-order:
-	$(RSCRIPT) generate_treatment_order.R $(TREATMENT_ORDER_FILE) $(REPS_PER_BLOCK) $(SEED)
+treatmentorder:
+	$(RSCRIPT) generate_treatment_order.R \
+		$(TREATMENT_ORDER_FILE) \
+		$(REPS_PER_BLOCK) \
+		$(SEED) \
+		$(subst $(space),$(comma),$(ALGORITHMS)) \
+		$(subst $(space),$(comma),$(NOISE_LEVELS)) \
+		$(subst $(space),$(comma),$(CONTENT_BLOCKS))
 
 plan:
 	$(PYTHON) build_experiment_plan.py \
@@ -52,11 +65,11 @@ download:
 		--outdir $(DOWNLOAD_DIR) \
 		--plan-file $(PLAN_FILE)
 
-run: full
+run: experiment
 
-full:
+experiment:
 	@if [ -z "$(PLAN_FILE)" ]; then \
-		echo "Usage: make full PLAN_FILE=experiment_plan.csv [IMAGE_DIR=images] [OUTPUT_DIR=experiment_outputs]"; \
+		echo "Usage: make experiment PLAN_FILE=experiment_plan.csv [IMAGE_DIR=images] [OUTPUT_DIR=results]"; \
 		exit 1; \
 	fi
 	$(PYTHON) run_full_experiment.py \
@@ -66,6 +79,13 @@ full:
 		--plan-file $(PLAN_FILE) \
 		$(if $(filter 1,$(SAVE_OUTPUTS)),--save-compressed-outputs,)
 
-pipeline: treatment-order plan
-	$(MAKE) download PLAN_FILE=$(PLAN_OUTPUT) DOWNLOAD_DIR=$(IMAGE_DIR)
-	$(MAKE) full PLAN_FILE=$(PLAN_OUTPUT) IMAGE_DIR=$(IMAGE_DIR) OUTPUT_DIR=$(OUTPUT_DIR) SEED=$(SEED) SAVE_OUTPUTS=$(SAVE_OUTPUTS)
+pipeline: treatmentorder plan
+	$(MAKE) download \
+		PLAN_FILE=$(PLAN_OUTPUT) \
+		DOWNLOAD_DIR=$(DOWNLOAD_DIR)
+	$(MAKE) experiment \
+		PLAN_FILE=$(PLAN_OUTPUT) \
+		IMAGE_DIR=$(IMAGE_DIR) \
+		OUTPUT_DIR=$(OUTPUT_DIR) \
+		SEED=$(SEED) \
+		SAVE_OUTPUTS=$(SAVE_OUTPUTS)
