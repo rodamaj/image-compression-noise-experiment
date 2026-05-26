@@ -6,7 +6,7 @@ empty :=
 space := $(empty) $(empty)
 comma := ,
 
-CSV ?= RAISE_6k.csv
+METADATA_FILE ?= RAISE_1k.csv
 IMAGE_DIR ?= images
 DOWNLOAD_DIR ?= $(IMAGE_DIR)
 OUTPUT_DIR ?= results
@@ -26,10 +26,10 @@ help:
 	@echo "Available targets:"
 	@echo "  make install"
 	@echo "  make treatmentorder [TREATMENT_ORDER_FILE=treatment_order.csv] [ALGORITHMS='PNG WEBP'] [NOISE_LEVELS='low high'] [CONTENT_BLOCKS='indoor outdoor'] [REPS_PER_BLOCK=1] [SEED=26]"
-	@echo "  make plan [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [SEED=26]"
+	@echo "  make plan [METADATA_FILE=RAISE_1k.csv] [IMAGE_DIR=images] [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [SEED=26]"
 	@echo "  make download PLAN_FILE=experiment_plan.csv [DOWNLOAD_DIR=images]"
-	@echo "  make experiment PLAN_FILE=experiment_plan.csv [IMAGE_DIR=images] [OUTPUT_DIR=results] [SEED=26]"
-	@echo "  make pipeline [OUTPUT_DIR=results] [IMAGE_DIR=images] [DOWNLOAD_DIR=images] [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [ALGORITHMS='PNG WEBP'] [NOISE_LEVELS='low high'] [CONTENT_BLOCKS='indoor outdoor'] [REPS_PER_BLOCK=1] [SEED=26] [SAVE_OUTPUTS=1]"
+	@echo "  make experiment PLAN_FILE=experiment_plan.csv [IMAGE_DIR=images] [OUTPUT_DIR=results] [SEED=26] [SAVE_OUTPUTS=1]"
+	@echo "  make pipeline [METADATA_FILE=RAISE_1k.csv] [OUTPUT_DIR=results] [IMAGE_DIR=images] [DOWNLOAD_DIR=images] [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [ALGORITHMS='PNG WEBP'] [NOISE_LEVELS='low high'] [CONTENT_BLOCKS='indoor outdoor'] [REPS_PER_BLOCK=1] [SEED=26] [SAVE_OUTPUTS=1]"
 	@echo "  make run    # alias of make experiment"
 	@echo "Optional flag:"
 	@echo "  SAVE_OUTPUTS=1   Save compressed noisy outputs to disk"
@@ -50,7 +50,7 @@ treatmentorder:
 
 plan:
 	$(PYTHON) build_experiment_plan.py \
-		--metadata-csv $(CSV) \
+		--metadata-csv $(METADATA_FILE) \
 		--input-dir $(IMAGE_DIR) \
 		--output-plan $(PLAN_OUTPUT) \
 		--seed $(SEED) \
@@ -79,7 +79,20 @@ experiment:
 		--plan-file $(PLAN_FILE) \
 		$(if $(filter 1,$(SAVE_OUTPUTS)),--save-compressed-outputs,)
 
-pipeline: treatmentorder plan
+pipeline:
+	$(MAKE) treatmentorder \
+		TREATMENT_ORDER_FILE=$(TREATMENT_ORDER_FILE) \
+		ALGORITHMS="$(ALGORITHMS)" \
+		NOISE_LEVELS="$(NOISE_LEVELS)" \
+		CONTENT_BLOCKS="$(CONTENT_BLOCKS)" \
+		REPS_PER_BLOCK=$(REPS_PER_BLOCK) \
+		SEED=$(SEED)
+	$(MAKE) plan \
+		METADATA_FILE=$(METADATA_FILE) \
+		IMAGE_DIR=$(IMAGE_DIR) \
+		PLAN_OUTPUT=$(PLAN_OUTPUT) \
+		TREATMENT_ORDER_FILE=$(TREATMENT_ORDER_FILE) \
+		SEED=$(SEED)
 	$(MAKE) download \
 		PLAN_FILE=$(PLAN_OUTPUT) \
 		DOWNLOAD_DIR=$(DOWNLOAD_DIR)

@@ -40,6 +40,7 @@ make pipeline
 ```
 
 Useful overrides:
+- `METADATA_FILE=RAISE_1k.csv`
 - `OUTPUT_DIR=results`
 - `IMAGE_DIR=images`
 - `DOWNLOAD_DIR=images`
@@ -116,7 +117,7 @@ This creates `treatment_order.csv`.
 ### Generate only the plan
 
 ```bash
-make plan PLAN_OUTPUT=experiment_plan.csv TREATMENT_ORDER_FILE=treatment_order.csv
+make plan METADATA_FILE=RAISE_1k.csv PLAN_OUTPUT=experiment_plan.csv TREATMENT_ORDER_FILE=treatment_order.csv
 ```
 
 This creates `experiment_plan.csv`.
