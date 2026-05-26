@@ -41,10 +41,15 @@ def load_metadata(metadata_csv):
             if not image_stem:
                 continue
 
+            try:
+                content_block = classify_content_block(keywords)
+            except ValueError:
+                continue
+
             metadata[image_stem] = {
                 "image_name": f"{image_stem}.TIF",
                 "keywords": keywords,
-                "content_block": classify_content_block(keywords),
+                "content_block": content_block,
                 "tiff_url": (row.get("TIFF") or "").strip(),
                 "image_size": (row.get("Image Size") or "").strip(),
             }

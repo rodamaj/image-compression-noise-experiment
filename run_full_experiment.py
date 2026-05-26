@@ -16,7 +16,7 @@ from experiment_downloads import (
     ensure_local_image,
     save_compressed_output,
 )
-from build_experiment_plan import load_experiment_plan, unique_experiment_images_from_run_plan
+from build_experiment_plan import load_experiment_plan
 
 
 def create_parser():
@@ -101,12 +101,6 @@ def main():
 
     total_runs = len(run_plan)
     completed_runs = 0
-    used_images = unique_experiment_images_from_run_plan(run_plan)
-    for image_path, record in used_images:
-        try:
-            ensure_local_image(image_path, record, session)
-        except ValueError as error:
-            parser.error(str(error))
 
     with results_path.open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames)

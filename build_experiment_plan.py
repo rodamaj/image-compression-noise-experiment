@@ -260,7 +260,7 @@ def create_parser():
     )
     parser.add_argument(
         "--metadata-csv",
-        default="RAISE_6k.csv",
+        default="RAISE_1k.csv",
         help="CSV file containing the dataset metadata and TIFF URLs.",
     )
     parser.add_argument(
