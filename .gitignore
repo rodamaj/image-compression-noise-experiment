@@ -40,3 +40,18 @@ htmlcov/
 .DS_Store
 .vscode/
 .idea/
+
+# Experiment outputs and generated plans
+treatment_order.csv
+experiment_plan.csv
+experiment_plan.summary.json
+experiment_outputs/
+experiment_outputs_run_*/
+experiment_single_image/
+experiment_single_treatment/
+experiment_test/
+
+# Optional downloaded image caches
+raise_tiffs_4928x3264/
+raise_tiffs_test/
+input_images/
