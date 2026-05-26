@@ -2,6 +2,7 @@
 *.tiff
 *.png
 *.webp
+*.csv
 
 # Virtual environments
 .venv/
@@ -44,6 +45,8 @@ htmlcov/
 # Experiment outputs and generated plans
 treatment_order.csv
 experiment_plan.csv
+results.csv
+results/
 experiment_outputs/
 experiment_outputs_run_*/
 experiment_single_image/
