@@ -22,14 +22,18 @@ base_treatments <- data.frame(
   stringsAsFactors = FALSE
 )
 
-treatment_rows <- base_treatments[rep(seq_len(nrow(base_treatments)), each = reps_per_block), ]
+treatment_rows <- base_treatments[
+  rep(seq_len(nrow(base_treatments)), each = reps_per_block),
+]
 
 set.seed(seed)
 randomized_indices <- sample(nrow(treatment_rows))
 treatment_order <- treatment_rows[randomized_indices, ]
 treatment_order$run_order <- seq_len(nrow(treatment_order))
 
-treatment_order <- treatment_order[, c("run_order", "algorithm", "noise_level", "content_block")]
+treatment_order <- treatment_order[, c(
+  "run_order", "algorithm", "noise_level", "content_block"
+)]
 
 print(treatment_order)
 write.csv(treatment_order, output_file, row.names = FALSE)
