@@ -19,16 +19,17 @@ SINGLE_OUTPUT_DIR ?= experiment_single_image
 TREATMENT_ALGORITHM ?= PNG
 TREATMENT_NOISE_LEVEL ?= low
 TREATMENT_OUTPUT_DIR ?= experiment_single_treatment
-TREATMENT_ORDER_FILE ?=
+TREATMENT_ORDER_FILE ?= treatment_order.csv
 PLAN_FILE ?=
 PLAN_OUTPUT ?= experiment_plan.csv
 SAVE_OUTPUTS ?= 0
 
-.PHONY: help install plan download run full single treatment compare pipeline
+.PHONY: help install treatment-order plan download run full single treatment compare pipeline
 
 help:
 	@echo "Available targets:"
 	@echo "  make install"
+	@echo "  make treatment-order [TREATMENT_ORDER_FILE=treatment_order.csv] [REPS_PER_BLOCK=10] [SEED=26]"
 	@echo "  make plan [PLAN_OUTPUT=experiment_plan.csv] [TREATMENT_ORDER_FILE=treatment_order.csv] [REPS_PER_BLOCK=10] [SEED=26]"
 	@echo "  make download [CSV=RAISE_1k.csv] [DOWNLOAD_DIR=raise_tiffs_4928x3264] [CONTENT_BLOCKS='indoor outdoor'] [REPS_PER_BLOCK=10] [SEED=26]"
 	@echo "  make full [IMAGE_DIR=images] [OUTPUT_DIR=experiment_outputs] [CONTENT_BLOCKS='indoor outdoor'] [REPS_PER_BLOCK=10] [SEED=26]"
@@ -39,11 +40,14 @@ help:
 	@echo "  make compare RUN1=experiment_outputs_run_1 RUN2=experiment_outputs_run_2"
 	@echo "Optional flag:"
 	@echo "  SAVE_OUTPUTS=1   Save compressed noisy outputs to disk"
-	@echo "  TREATMENT_ORDER_FILE=treatment_order.csv   Follow the treatment order exported from R"
-	@echo "  REPS_PER_BLOCK=10   Used only when no treatment-order CSV is provided"
+	@echo "  TREATMENT_ORDER_FILE=treatment_order.csv   CSV generated from R for treatment order"
+	@echo "  REPS_PER_BLOCK=10   In pipeline/treatment-order: repetitions per treatment in R; otherwise: sampled images per block in Python"
 
 install:
 	$(PIP) install -r requirements.txt
+
+treatment-order:
+	$(RSCRIPT) generate_treatment_order.R $(TREATMENT_ORDER_FILE) $(REPS_PER_BLOCK) $(SEED)
 
 plan:
 	$(PYTHON) prepare_experiment_plan.py \
@@ -120,7 +124,7 @@ treatment:
 		$(if $(filter 1,$(SAVE_OUTPUTS)),--save-compressed-outputs,) \
 		$(if $(IMAGE_NAME),--image-name $(IMAGE_NAME),)
 
-pipeline: plan
+pipeline: treatment-order plan
 	$(PYTHON) download_raise_tiffs.py --plan-file $(PLAN_OUTPUT) --outdir $(IMAGE_DIR)
 	$(PYTHON) run_full_experiment.py \
 		--mode full \
