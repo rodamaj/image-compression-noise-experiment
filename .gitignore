@@ -44,7 +44,6 @@ htmlcov/
 # Experiment outputs and generated plans
 treatment_order.csv
 experiment_plan.csv
-experiment_plan.summary.json
 experiment_outputs/
 experiment_outputs_run_*/
 experiment_single_image/
