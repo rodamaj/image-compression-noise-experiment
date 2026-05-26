@@ -2,12 +2,6 @@ import csv
 from pathlib import Path
 
 
-DEFAULT_ALGORITHMS = ("PNG", "WEBP")
-DEFAULT_NOISE_LEVELS = ("low", "high")
-DEFAULT_CONTENT_BLOCKS = ("indoor", "outdoor")
-TREATMENT_LABEL_SEPARATOR = "-"
-
-
 def classify_content_block(keywords):
     """Classify an image as indoor or outdoor from the dataset keywords."""
 
@@ -56,41 +50,3 @@ def load_metadata(metadata_csv):
             }
 
     return metadata
-
-
-def build_treatment_label(algorithm, noise_level, content_block):
-    """Build a treatment label compatible with the R randomization script."""
-
-    noise_fragment = "LowNoise" if noise_level == "low" else "HighNoise"
-    block_fragment = content_block.capitalize()
-    algorithm_fragment = "WebP" if algorithm.upper() == "WEBP" else "PNG"
-    return TREATMENT_LABEL_SEPARATOR.join(
-        [algorithm_fragment, noise_fragment, block_fragment]
-    )
-
-
-def normalize_algorithm(value):
-    """Normalize an algorithm token to the internal uppercase representation."""
-
-    algorithm = (value or "").strip().upper()
-    if algorithm not in {"PNG", "WEBP"}:
-        raise ValueError(f"Unsupported algorithm value: {value!r}")
-    return algorithm
-
-
-def normalize_noise_level(value):
-    """Normalize a noise level token to low/high."""
-
-    noise_level = (value or "").strip().lower()
-    if noise_level not in {"low", "high"}:
-        raise ValueError(f"Unsupported noise level value: {value!r}")
-    return noise_level
-
-
-def normalize_content_block(value):
-    """Normalize a content block token to indoor/outdoor."""
-
-    content_block = (value or "").strip().lower()
-    if content_block not in {"indoor", "outdoor"}:
-        raise ValueError(f"Unsupported content block value: {value!r}")
-    return content_block

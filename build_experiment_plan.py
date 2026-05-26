@@ -1,14 +1,13 @@
+import argparse
 import csv
 from pathlib import Path
 
-from experiment_metadata import (
-    build_treatment_label,
-    normalize_algorithm,
-    normalize_content_block,
-    normalize_noise_level,
-)
+from experiment_metadata import load_metadata
+from experiment_processing import DEFAULT_RANDOM_SEED
+from experiment_sampling import build_candidate_images, select_images_by_block_requirements
 
 
+TREATMENT_LABEL_SEPARATOR = "-"
 TREATMENT_ORDER_REQUIRED_COLUMNS = {"algorithm", "noise_level", "content_block"}
 EXPERIMENT_PLAN_REQUIRED_COLUMNS = {
     "run_order",
@@ -22,6 +21,44 @@ EXPERIMENT_PLAN_REQUIRED_COLUMNS = {
     "algorithm",
     "noise_level",
 }
+
+
+def build_treatment_label(algorithm, noise_level, content_block):
+    """Build a treatment label compatible with the R randomization script."""
+
+    noise_fragment = "LowNoise" if noise_level == "low" else "HighNoise"
+    block_fragment = content_block.capitalize()
+    algorithm_fragment = "WebP" if algorithm.upper() == "WEBP" else "PNG"
+    return TREATMENT_LABEL_SEPARATOR.join(
+        [algorithm_fragment, noise_fragment, block_fragment]
+    )
+
+
+def normalize_algorithm(value):
+    """Normalize an algorithm token to the internal uppercase representation."""
+
+    algorithm = (value or "").strip().upper()
+    if algorithm not in {"PNG", "WEBP"}:
+        raise ValueError(f"Unsupported algorithm value: {value!r}")
+    return algorithm
+
+
+def normalize_noise_level(value):
+    """Normalize a noise level token to low/high."""
+
+    noise_level = (value or "").strip().lower()
+    if noise_level not in {"low", "high"}:
+        raise ValueError(f"Unsupported noise level value: {value!r}")
+    return noise_level
+
+
+def normalize_content_block(value):
+    """Normalize a content block token to indoor/outdoor."""
+
+    content_block = (value or "").strip().lower()
+    if content_block not in {"indoor", "outdoor"}:
+        raise ValueError(f"Unsupported content block value: {value!r}")
+    return content_block
 
 
 def load_treatment_order(order_file):
@@ -159,49 +196,6 @@ def load_experiment_plan(plan_file, input_dir):
     return run_plan
 
 
-def build_run_plan(experiment_images, algorithms, noise_levels, treatment_order=None):
-    """Create the exact ordered list of runs to execute."""
-
-    images_by_block = {}
-    for image_path, record in experiment_images:
-        images_by_block.setdefault(record["content_block"], []).append((image_path, record))
-
-    for block_images in images_by_block.values():
-        block_images.sort(key=lambda item: item[1]["block_sample_index"])
-
-    runs = []
-    if treatment_order:
-        for treatment in treatment_order:
-            for image_path, record in images_by_block.get(treatment["content_block"], []):
-                runs.append(
-                    {
-                        "image_path": image_path,
-                        "record": record,
-                        "algorithm": treatment["algorithm"],
-                        "noise_level": treatment["noise_level"],
-                        "treatment_label": treatment["label"],
-                    }
-                )
-        return runs
-
-    for image_path, record in experiment_images:
-        for algorithm in algorithms:
-            for noise_level in noise_levels:
-                runs.append(
-                    {
-                        "image_path": image_path,
-                        "record": record,
-                        "algorithm": algorithm,
-                        "noise_level": noise_level,
-                        "treatment_label": build_treatment_label(
-                            algorithm, noise_level, record["content_block"]
-                        ),
-                    }
-                )
-
-    return runs
-
-
 def build_run_plan_from_csv(experiment_images, treatment_order):
     """Create the exact ordered list of runs defined row by row in the CSV plan."""
 
@@ -255,3 +249,129 @@ def unique_experiment_images_from_run_plan(run_plan):
         seen.add(key)
         unique_images.append((image_path, record))
     return unique_images
+
+
+def create_parser():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Prepare a fully specified experiment plan before downloading images "
+            "or running the experiment."
+        )
+    )
+    parser.add_argument(
+        "--metadata-csv",
+        default="RAISE_1k.csv",
+        help="CSV file containing the dataset metadata and TIFF URLs.",
+    )
+    parser.add_argument(
+        "--input-dir",
+        default="images",
+        help="Directory that will hold the downloaded source images.",
+    )
+    parser.add_argument(
+        "--output-plan",
+        default="experiment_plan.csv",
+        help="Path to the generated experiment plan CSV.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_RANDOM_SEED,
+        help=f"Base seed for reproducible image selection (default: {DEFAULT_RANDOM_SEED}).",
+    )
+    parser.add_argument(
+        "--treatment-order-file",
+        required=True,
+        help=(
+            "CSV file with columns algorithm, noise_level, and content_block "
+            "that defines the treatment sequence row by row."
+        ),
+    )
+    return parser
+
+
+def main():
+    parser = create_parser()
+    args = parser.parse_args()
+
+    try:
+        treatment_order = load_treatment_order(args.treatment_order_file)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+
+    selected_blocks = {treatment["content_block"] for treatment in treatment_order}
+
+    try:
+        metadata = load_metadata(args.metadata_csv)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+
+    try:
+        candidate_images = build_candidate_images(
+            args.input_dir,
+            metadata,
+            selected_blocks,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+
+    if not candidate_images:
+        parser.error("No dataset entries matched the selected content blocks.")
+
+    try:
+        selected_images = select_images_by_block_requirements(
+            candidate_images,
+            count_required_images_by_block(treatment_order),
+            args.seed,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+
+    try:
+        run_plan = build_run_plan_from_csv(selected_images, treatment_order)
+    except ValueError as error:
+        parser.error(str(error))
+
+    plan_path = Path(args.output_plan)
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "run_order",
+        "image_name",
+        "image_filename",
+        "tiff_url",
+        "content_block",
+        "block_sample_index",
+        "keywords",
+        "treatment_label",
+        "algorithm",
+        "noise_level",
+    ]
+
+    with plan_path.open("w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+        writer.writeheader()
+        for run_order, planned_run in enumerate(run_plan, start=1):
+            image_path = planned_run["image_path"]
+            record = planned_run["record"]
+            writer.writerow(
+                {
+                    "run_order": run_order,
+                    "image_name": record["image_name"],
+                    "image_filename": image_path.name,
+                    "tiff_url": record["tiff_url"],
+                    "content_block": record["content_block"],
+                    "block_sample_index": record["block_sample_index"],
+                    "keywords": record["keywords"],
+                    "treatment_label": planned_run["treatment_label"],
+                    "algorithm": planned_run["algorithm"],
+                    "noise_level": planned_run["noise_level"],
+                }
+            )
+
+    print(f"Experiment plan written to: {plan_path}")
+    print(f"Selected images: {len(selected_images)}")
+    print(f"Planned runs: {len(run_plan)}")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import time
 from pathlib import Path
 
@@ -122,3 +123,65 @@ def load_download_plan(plan_file):
             planned_images[image_filename]["run_orders"].append(int(run_order))
 
     return [planned_images[key] for key in sorted(planned_images)]
+
+
+def is_valid_local_image(path):
+    """Return True when a local file exists and matches the required size."""
+
+    path = Path(path)
+    if not path.is_file():
+        return False
+
+    return normalize_download_image(path)
+
+
+def ensure_local_image(image_path, record, session):
+    """Download the image only when it is missing or invalid locally."""
+
+    image_path = Path(image_path)
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if is_valid_local_image(image_path):
+        return image_path
+
+    if image_path.exists():
+        image_path.unlink()
+
+    ok = download_file(session, record["tiff_url"], str(image_path))
+    if not ok:
+        raise ValueError(f"Could not download image: {record['image_name']}")
+
+    if not is_valid_local_image(image_path):
+        if image_path.exists():
+            image_path.unlink()
+        raise ValueError(
+            f"Downloaded image does not match required size {TARGET_IMAGE_SIZE}: "
+            f"{record['image_name']}"
+        )
+
+    return image_path
+
+
+def derive_condition_seed(base_seed, image_name, content_block, algorithm, noise_level):
+    """Create a deterministic seed for one image-treatment combination."""
+
+    digest = hashlib.sha256(
+        f"{base_seed}|{image_name}|{content_block}|{algorithm}|{noise_level}".encode(
+            "utf-8"
+        )
+    ).digest()
+    return int.from_bytes(digest[:8], byteorder="big") % (2**32)
+
+
+def build_output_name(stem, content_block, algorithm, noise_level):
+    """Create a deterministic filename for compressed outputs."""
+
+    return f"{stem}__{content_block}__{algorithm.lower()}__{noise_level}.{algorithm.lower()}"
+
+
+def save_compressed_output(data, path):
+    """Write the compressed noisy output bytes to disk."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
