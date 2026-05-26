@@ -165,10 +165,10 @@ This script:
 - If you pass `--image-name`, the run is restricted to that single image.
 - In `single-treatment` mode, requires exactly one algorithm and one noise level.
 - If you pass `--plan-file`, Python follows that exact precomputed plan.
-- Writes a `results.csv` file with the measured response, compressed sizes, and `run_order` for the execution sequence.
+- Writes a `results.csv` dataset with the measured response, `run_order`, and compressed sizes in `kb` only.
 - Writes a `summary.json` file with the run configuration.
 - Writes a `manifest.json` file with the run parameters, software versions, and SHA-256 hashes of the input images.
-- Optionally saves compressed noisy outputs for inspection.
+- Optionally saves compressed noisy outputs for inspection, using the original image name plus a deterministic suffix.
 
 For reproducibility:
 - `requirements.txt` pins dependency versions.

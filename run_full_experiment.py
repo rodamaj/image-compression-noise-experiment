@@ -16,7 +16,6 @@ from compression_experiment import (
     DEFAULT_RANDOM_SEED,
     apply_gaussian_noise,
     bytes_to_kb,
-    bytes_to_mb,
     compress_image,
     get_noise_percentage,
 )
@@ -853,23 +852,16 @@ def main():
     fieldnames = [
         "run_order",
         "image_name",
-        "source_path",
         "content_block",
         "block_sample_index",
         "keywords",
-        "treatment_label",
         "algorithm",
         "noise_level",
         "seed",
         "noise_percentage",
-        "baseline_compressed_size_bytes",
         "baseline_compressed_size_kb",
-        "baseline_compressed_size_mb",
-        "noisy_compressed_size_bytes",
         "noisy_compressed_size_kb",
-        "noisy_compressed_size_mb",
         "response_percent",
-        "compressed_output_path",
     ]
 
     total_runs = len(run_plan)
@@ -913,61 +905,43 @@ def main():
                     seed=seed,
                 )
 
-                compressed_output_path = ""
                 if args.save_compressed_outputs:
-                    compressed_output_path = str(
-                        (
-                            output_dir
-                            / "compressed_outputs"
-                            / record["content_block"]
-                            / algorithm.lower()
-                            / noise_level
-                            / build_output_name(
-                                image_path.stem,
-                                record["content_block"],
-                                algorithm,
-                                noise_level,
-                            )
-                        ).resolve()
+                    compressed_output_path = (
+                        output_dir
+                        / "compressed_outputs"
+                        / record["content_block"]
+                        / algorithm.lower()
+                        / noise_level
+                        / build_output_name(
+                            image_path.stem,
+                            record["content_block"],
+                            algorithm,
+                            noise_level,
+                        )
                     )
                     save_compressed_output(
                         result["noisy_compressed_image"],
-                        Path(compressed_output_path),
+                        compressed_output_path,
                     )
 
                 writer.writerow(
                     {
                         "run_order": completed_runs + 1,
                         "image_name": image_path.name,
-                        "source_path": str(image_path.resolve()),
                         "content_block": record["content_block"],
                         "block_sample_index": record["block_sample_index"],
                         "keywords": record["keywords"],
-                        "treatment_label": planned_run["treatment_label"],
                         "algorithm": result["algorithm"],
                         "noise_level": result["noise_level"],
                         "seed": result["seed"],
                         "noise_percentage": result["noise_percentage"],
-                        "baseline_compressed_size_bytes": result[
-                            "baseline_compressed_size"
-                        ],
                         "baseline_compressed_size_kb": bytes_to_kb(
                             result["baseline_compressed_size"]
                         ),
-                        "baseline_compressed_size_mb": bytes_to_mb(
-                            result["baseline_compressed_size"]
-                        ),
-                        "noisy_compressed_size_bytes": result[
-                            "noisy_compressed_size"
-                        ],
                         "noisy_compressed_size_kb": bytes_to_kb(
                             result["noisy_compressed_size"]
                         ),
-                        "noisy_compressed_size_mb": bytes_to_mb(
-                            result["noisy_compressed_size"]
-                        ),
                         "response_percent": result["response"],
-                        "compressed_output_path": compressed_output_path,
                     }
                 )
 
