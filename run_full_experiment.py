@@ -1,16 +1,11 @@
 import argparse
 import csv
-import hashlib
 import json
-import platform
-import random
 from pathlib import Path
-from urllib.parse import urlparse
 
 import numpy as np
 import requests
 from PIL import Image
-from PIL import __version__ as PILLOW_VERSION
 
 from compression_experiment import (
     DEFAULT_RANDOM_SEED,
@@ -19,559 +14,38 @@ from compression_experiment import (
     compress_image,
     get_noise_percentage,
 )
-from download_raise_tiffs import TARGET_IMAGE_SIZE, download_file, normalize_download_image
+from experiment_downloads import TARGET_IMAGE_SIZE
+from experiment_io import (
+    build_environment_manifest,
+    build_image_manifest,
+    build_output_name,
+    derive_condition_seed,
+    ensure_local_image,
+    save_compressed_output,
+)
+from experiment_metadata import (
+    DEFAULT_ALGORITHMS,
+    DEFAULT_CONTENT_BLOCKS,
+    DEFAULT_NOISE_LEVELS,
+    build_treatment_label,
+    load_metadata,
+)
+from experiment_plan import (
+    build_run_plan,
+    build_run_plan_from_csv,
+    count_required_images_by_block,
+    load_experiment_plan,
+    load_treatment_order,
+    unique_experiment_images_from_run_plan,
+)
+from experiment_sampling import (
+    build_candidate_images,
+    select_images_by_block,
+    select_images_by_block_requirements,
+)
 
 
-DEFAULT_ALGORITHMS = ("PNG", "WEBP")
-DEFAULT_NOISE_LEVELS = ("low", "high")
-DEFAULT_CONTENT_BLOCKS = ("indoor", "outdoor")
 DEFAULT_MODE = "full"
-TREATMENT_LABEL_SEPARATOR = "-"
-TREATMENT_ORDER_REQUIRED_COLUMNS = {"algorithm", "noise_level", "content_block"}
-EXPERIMENT_PLAN_REQUIRED_COLUMNS = {
-    "run_order",
-    "image_name",
-    "image_filename",
-    "tiff_url",
-    "content_block",
-    "block_sample_index",
-    "keywords",
-    "treatment_label",
-    "algorithm",
-    "noise_level",
-}
-
-
-def classify_content_block(keywords):
-    """Classify an image as indoor or outdoor from the dataset keywords."""
-
-    normalized_keywords = (keywords or "").strip().lower()
-    has_indoor = "indoor" in normalized_keywords
-    has_outdoor = "outdoor" in normalized_keywords
-
-    if has_indoor and not has_outdoor:
-        return "indoor"
-
-    if has_outdoor and not has_indoor:
-        return "outdoor"
-
-    if has_indoor and has_outdoor:
-        raise ValueError(
-            f"Keywords contain both indoor and outdoor labels: {keywords!r}"
-        )
-
-    raise ValueError(f"Keywords do not contain indoor/outdoor labels: {keywords!r}")
-
-
-def load_metadata(metadata_csv):
-    """Load dataset metadata keyed by image stem."""
-
-    metadata = {}
-    with Path(metadata_csv).open(newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
-        required_columns = {"File", "Keywords", "TIFF", "Image Size"}
-        missing_columns = required_columns - set(reader.fieldnames or [])
-        if missing_columns:
-            missing = ", ".join(sorted(missing_columns))
-            raise ValueError(f"Metadata CSV is missing required columns: {missing}")
-
-        for row in reader:
-            image_stem = (row.get("File") or "").strip().lower()
-            keywords = (row.get("Keywords") or "").strip()
-            if not image_stem:
-                continue
-
-            metadata[image_stem] = {
-                "image_name": f"{image_stem}.TIF",
-                "keywords": keywords,
-                "content_block": classify_content_block(keywords),
-                "tiff_url": (row.get("TIFF") or "").strip(),
-                "image_size": (row.get("Image Size") or "").strip(),
-            }
-
-    return metadata
-
-
-def build_candidate_images(input_dir, metadata, selected_blocks, image_name=None):
-    """Return eligible dataset entries as local-path candidates."""
-
-    candidates = []
-    skipped_images = []
-    normalized_image_name = image_name.strip().lower() if image_name else None
-
-    for image_stem, record in sorted(metadata.items()):
-        if record["content_block"] not in selected_blocks:
-            continue
-
-        if "4928 x 3264" not in record["image_size"]:
-            skipped_images.append(
-                {
-                    "image_name": record["image_name"],
-                    "reason": f"dataset size {record['image_size']!r} does not match required size",
-                }
-            )
-            continue
-
-        if not record["tiff_url"]:
-            skipped_images.append(
-                {
-                    "image_name": record["image_name"],
-                    "reason": "missing TIFF URL in metadata",
-                }
-            )
-            continue
-
-        if normalized_image_name and record["image_name"].lower() != normalized_image_name:
-            continue
-
-        filename = Path(urlparse(record["tiff_url"]).path).name or record["image_name"]
-        image_path = Path(input_dir) / filename
-        candidates.append(
-            (
-                image_path,
-                {
-                    **record,
-                    "image_stem": image_stem,
-                },
-            )
-        )
-
-    return candidates, skipped_images
-
-
-def select_images_by_block(experiment_images, selected_blocks, reps_per_block, seed):
-    """Select a reproducible sample of distinct images within each content block."""
-
-    grouped_images = {block: [] for block in selected_blocks}
-    for image_path, record in experiment_images:
-        grouped_images[record["content_block"]].append((image_path, record))
-
-    rng = random.Random(seed)
-    selected_images = []
-
-    for block in sorted(selected_blocks):
-        block_images = sorted(grouped_images.get(block, []), key=lambda item: item[0].name)
-        if reps_per_block and len(block_images) < reps_per_block:
-            raise ValueError(
-                f"Block '{block}' only has {len(block_images)} eligible images, "
-                f"but {reps_per_block} were requested."
-            )
-
-        if reps_per_block:
-            block_images = rng.sample(block_images, reps_per_block)
-            block_images.sort(key=lambda item: item[0].name)
-
-        for sample_index, (image_path, record) in enumerate(block_images, start=1):
-            selected_images.append(
-                (
-                    image_path,
-                    {
-                        **record,
-                        "block_sample_index": sample_index,
-                    },
-                )
-            )
-
-    return selected_images
-
-
-def compute_sha256(path):
-    """Return the SHA-256 hash for a file."""
-
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as file_handle:
-        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def is_valid_local_image(path):
-    """Return True when a local file exists and matches the required size."""
-
-    path = Path(path)
-    if not path.is_file():
-        return False
-
-    return normalize_download_image(path)
-
-
-def ensure_local_image(image_path, record, session):
-    """Download the image only when it is missing or invalid locally."""
-
-    image_path = Path(image_path)
-    image_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if is_valid_local_image(image_path):
-        return image_path
-
-    if image_path.exists():
-        image_path.unlink()
-
-    ok = download_file(session, record["tiff_url"], str(image_path))
-    if not ok:
-        raise ValueError(f"Could not download image: {record['image_name']}")
-
-    if not is_valid_local_image(image_path):
-        if image_path.exists():
-            image_path.unlink()
-        raise ValueError(
-            f"Downloaded image does not match required size {TARGET_IMAGE_SIZE}: "
-            f"{record['image_name']}"
-        )
-
-    return image_path
-
-
-def build_image_manifest(experiment_images):
-    """Build a reproducibility manifest for the selected images."""
-
-    manifest = []
-    for image_path, record in experiment_images:
-        manifest.append(
-            {
-                "image_name": image_path.name,
-                "source_path": str(image_path.resolve()),
-                "content_block": record["content_block"],
-                "block_sample_index": record.get("block_sample_index"),
-                "keywords": record["keywords"],
-                "sha256": compute_sha256(image_path),
-            }
-        )
-    return manifest
-
-
-def unique_experiment_images_from_run_plan(run_plan):
-    """Extract the unique images actually used by the ordered run plan."""
-
-    seen = set()
-    unique_images = []
-    for planned_run in run_plan:
-        image_path = planned_run["image_path"]
-        record = planned_run["record"]
-        key = str(image_path.resolve()).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_images.append((image_path, record))
-    return unique_images
-
-
-def build_environment_manifest():
-    """Capture the local software environment used for the run."""
-
-    return {
-        "python_version": platform.python_version(),
-        "platform": platform.platform(),
-        "numpy_version": np.__version__,
-        "pillow_version": PILLOW_VERSION,
-    }
-
-
-def derive_condition_seed(base_seed, image_name, content_block, algorithm, noise_level):
-    """Create a deterministic seed for one image-treatment combination."""
-
-    digest = hashlib.sha256(
-        f"{base_seed}|{image_name}|{content_block}|{algorithm}|{noise_level}".encode(
-            "utf-8"
-        )
-    ).digest()
-    return int.from_bytes(digest[:8], byteorder="big") % (2**32)
-
-
-def build_treatment_label(algorithm, noise_level, content_block):
-    """Build a treatment label compatible with the R randomization script."""
-
-    noise_fragment = "LowNoise" if noise_level == "low" else "HighNoise"
-    block_fragment = content_block.capitalize()
-    algorithm_fragment = "WebP" if algorithm.upper() == "WEBP" else "PNG"
-    return TREATMENT_LABEL_SEPARATOR.join(
-        [algorithm_fragment, noise_fragment, block_fragment]
-    )
-
-
-def normalize_algorithm(value):
-    """Normalize an algorithm token to the internal uppercase representation."""
-
-    algorithm = (value or "").strip().upper()
-    if algorithm not in {"PNG", "WEBP"}:
-        raise ValueError(f"Unsupported algorithm value: {value!r}")
-    return algorithm
-
-
-def normalize_noise_level(value):
-    """Normalize a noise level token to low/high."""
-
-    noise_level = (value or "").strip().lower()
-    if noise_level not in {"low", "high"}:
-        raise ValueError(f"Unsupported noise level value: {value!r}")
-    return noise_level
-
-
-def normalize_content_block(value):
-    """Normalize a content block token to indoor/outdoor."""
-
-    content_block = (value or "").strip().lower()
-    if content_block not in {"indoor", "outdoor"}:
-        raise ValueError(f"Unsupported content block value: {value!r}")
-    return content_block
-
-
-def load_treatment_order(order_file):
-    """Load a treatment-order CSV exported from R."""
-
-    rows = []
-    with Path(order_file).open(newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
-        missing_columns = TREATMENT_ORDER_REQUIRED_COLUMNS - set(reader.fieldnames or [])
-        if missing_columns:
-            missing = ", ".join(sorted(missing_columns))
-            raise ValueError(
-                "Treatment order CSV is missing required columns: "
-                f"{missing}"
-            )
-
-        for row_index, row in enumerate(reader, start=2):
-            try:
-                algorithm = normalize_algorithm(row.get("algorithm"))
-                noise_level = normalize_noise_level(row.get("noise_level"))
-                content_block = normalize_content_block(row.get("content_block"))
-            except ValueError as error:
-                raise ValueError(
-                    f"Invalid treatment order row {row_index}: {error}"
-                ) from error
-
-            run_order_raw = (row.get("run_order") or "").strip()
-            run_order = None
-            if run_order_raw:
-                try:
-                    run_order = int(run_order_raw)
-                except ValueError as error:
-                    raise ValueError(
-                        f"Invalid run_order in treatment order row {row_index}: "
-                        f"{run_order_raw!r}"
-                    ) from error
-
-            rows.append(
-                {
-                    "run_order": run_order,
-                    "label": build_treatment_label(
-                        algorithm, noise_level, content_block
-                    ),
-                    "algorithm": algorithm,
-                    "noise_level": noise_level,
-                    "content_block": content_block,
-                }
-            )
-
-    if not rows:
-        raise ValueError("Treatment order CSV is empty.")
-
-    if any(row["run_order"] is not None for row in rows):
-        if not all(row["run_order"] is not None for row in rows):
-            raise ValueError(
-                "Treatment order CSV must either define run_order for every row or for none."
-            )
-        rows.sort(key=lambda row: row["run_order"])
-
-    return rows
-
-
-def count_required_images_by_block(treatment_order):
-    """Return how many distinct images are needed in each block."""
-
-    required_counts = {}
-    for treatment in treatment_order:
-        block = treatment["content_block"]
-        required_counts[block] = required_counts.get(block, 0) + 1
-    return required_counts
-
-
-def load_experiment_plan(plan_file, input_dir):
-    """Load a fully specified experiment plan exported before download/run."""
-
-    run_plan = []
-    with Path(plan_file).open(newline="", encoding="utf-8") as csv_file:
-        reader = csv.DictReader(csv_file)
-        missing_columns = EXPERIMENT_PLAN_REQUIRED_COLUMNS - set(reader.fieldnames or [])
-        if missing_columns:
-            missing = ", ".join(sorted(missing_columns))
-            raise ValueError(f"Experiment plan CSV is missing required columns: {missing}")
-
-        for row_index, row in enumerate(reader, start=2):
-            try:
-                run_order = int((row.get("run_order") or "").strip())
-                block_sample_index = int((row.get("block_sample_index") or "").strip())
-                algorithm = normalize_algorithm(row.get("algorithm"))
-                noise_level = normalize_noise_level(row.get("noise_level"))
-                content_block = normalize_content_block(row.get("content_block"))
-            except ValueError as error:
-                raise ValueError(f"Invalid experiment plan row {row_index}: {error}") from error
-
-            image_name = (row.get("image_name") or "").strip()
-            image_filename = (row.get("image_filename") or "").strip()
-            tiff_url = (row.get("tiff_url") or "").strip()
-            keywords = (row.get("keywords") or "").strip()
-            treatment_label = (row.get("treatment_label") or "").strip()
-
-            if not image_name or not image_filename or not tiff_url or not treatment_label:
-                raise ValueError(
-                    f"Invalid experiment plan row {row_index}: missing image_name, "
-                    "image_filename, tiff_url, or treatment_label."
-                )
-
-            expected_label = build_treatment_label(algorithm, noise_level, content_block)
-            if treatment_label != expected_label:
-                raise ValueError(
-                    f"Invalid experiment plan row {row_index}: treatment_label "
-                    f"{treatment_label!r} does not match the row values "
-                    f"({expected_label!r})."
-                )
-
-            run_plan.append(
-                {
-                    "run_order": run_order,
-                    "image_path": Path(input_dir) / image_filename,
-                    "record": {
-                        "image_name": image_name,
-                        "tiff_url": tiff_url,
-                        "content_block": content_block,
-                        "block_sample_index": block_sample_index,
-                        "keywords": keywords,
-                    },
-                    "algorithm": algorithm,
-                    "noise_level": noise_level,
-                    "treatment_label": treatment_label,
-                }
-            )
-
-    if not run_plan:
-        raise ValueError("Experiment plan CSV is empty.")
-
-    run_plan.sort(key=lambda item: item["run_order"])
-    return run_plan
-
-
-def build_run_plan(experiment_images, algorithms, noise_levels, treatment_order=None):
-    """Create the exact ordered list of runs to execute."""
-
-    images_by_block = {}
-    for image_path, record in experiment_images:
-        images_by_block.setdefault(record["content_block"], []).append((image_path, record))
-
-    for block_images in images_by_block.values():
-        block_images.sort(key=lambda item: item[1]["block_sample_index"])
-
-    runs = []
-    if treatment_order:
-        for treatment in treatment_order:
-            for image_path, record in images_by_block.get(treatment["content_block"], []):
-                runs.append(
-                    {
-                        "image_path": image_path,
-                        "record": record,
-                        "algorithm": treatment["algorithm"],
-                        "noise_level": treatment["noise_level"],
-                        "treatment_label": treatment["label"],
-                    }
-                )
-        return runs
-
-    for image_path, record in experiment_images:
-        for algorithm in algorithms:
-            for noise_level in noise_levels:
-                runs.append(
-                    {
-                        "image_path": image_path,
-                        "record": record,
-                        "algorithm": algorithm,
-                        "noise_level": noise_level,
-                        "treatment_label": build_treatment_label(
-                            algorithm, noise_level, record["content_block"]
-                        ),
-                    }
-                )
-
-    return runs
-
-
-def select_images_by_block_requirements(experiment_images, required_counts, seed):
-    """Select as many images from each block as the run plan requires."""
-
-    selected_blocks = set(required_counts)
-    selected_images = []
-    grouped_images = {block: [] for block in selected_blocks}
-    for image_path, record in experiment_images:
-        grouped_images[record["content_block"]].append((image_path, record))
-
-    rng = random.Random(seed)
-    for block in sorted(selected_blocks):
-        block_images = sorted(grouped_images.get(block, []), key=lambda item: item[0].name)
-        required = required_counts.get(block, 0)
-        if required > len(block_images):
-            raise ValueError(
-                f"Run plan requires {required} images from block '{block}', "
-                f"but only {len(block_images)} eligible images are available."
-            )
-
-        block_images = rng.sample(block_images, required)
-        block_images.sort(key=lambda item: item[0].name)
-
-        for sample_index, (image_path, record) in enumerate(block_images, start=1):
-            selected_images.append(
-                (
-                    image_path,
-                    {
-                        **record,
-                        "block_sample_index": sample_index,
-                    },
-                )
-            )
-
-    return selected_images
-
-
-def build_run_plan_from_csv(experiment_images, treatment_order):
-    """Create the exact ordered list of runs defined row by row in the CSV plan."""
-    images_by_block = {}
-    for image_path, record in experiment_images:
-        images_by_block.setdefault(record["content_block"], []).append((image_path, record))
-
-    for block_images in images_by_block.values():
-        block_images.sort(key=lambda item: item[1]["block_sample_index"])
-
-    block_offsets = {block: 0 for block in images_by_block}
-    runs = []
-
-    for row_index, treatment in enumerate(treatment_order, start=1):
-        block = treatment["content_block"]
-        candidates = images_by_block.get(block, [])
-        offset = block_offsets.get(block, 0)
-        if offset >= len(candidates):
-                raise ValueError(
-                    f"Run-plan row {row_index} requires another image from block "
-                    f"{block!r}, but no eligible sampled images remain. Increase "
-                    "--reps-per-block or reduce the number of CSV rows for that block."
-                )
-        image_path, record = candidates[offset]
-        block_offsets[block] = offset + 1
-
-        runs.append(
-            {
-                "image_path": image_path,
-                "record": record,
-                "algorithm": treatment["algorithm"],
-                "noise_level": treatment["noise_level"],
-                "treatment_label": treatment["label"],
-            }
-        )
-
-    return runs
-
-
-def build_output_name(stem, content_block, algorithm, noise_level):
-    """Create a deterministic filename for compressed outputs."""
-
-    return f"{stem}__{content_block}__{algorithm.lower()}__{noise_level}.{algorithm.lower()}"
 
 
 def run_condition(image, algorithm, noise_level, seed):
@@ -604,13 +78,6 @@ def run_condition(image, algorithm, noise_level, seed):
         "noise_level": noise_level,
         "seed": seed,
     }
-
-
-def save_compressed_output(data, path):
-    """Write the compressed noisy output bytes to disk."""
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
 
 
 def create_parser():
@@ -784,7 +251,6 @@ def main():
                     "--mode single-treatment requires exactly one algorithm and one noise level."
                 )
 
-        treatment_order = None
         if args.treatment_order_file:
             try:
                 treatment_order = load_treatment_order(args.treatment_order_file)
@@ -810,7 +276,7 @@ def main():
 
     if not args.plan_file:
         if args.image_name:
-            for sample_index, (image_path, record) in enumerate(experiment_images, start=1):
+            for sample_index, (_, record) in enumerate(experiment_images, start=1):
                 record["block_sample_index"] = sample_index
         elif treatment_order:
             try:
