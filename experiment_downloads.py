@@ -173,10 +173,13 @@ def derive_condition_seed(base_seed, image_name, content_block, algorithm, noise
     return int.from_bytes(digest[:8], byteorder="big") % (2**32)
 
 
-def build_output_name(stem, content_block, algorithm, noise_level):
+def build_output_name(stem, content_block, output_id, algorithm, noise_level):
     """Create a deterministic filename for compressed outputs."""
 
-    return f"{stem}__{content_block}__{algorithm.lower()}__{noise_level}.{algorithm.lower()}"
+    return (
+        f"{stem}__{content_block}__sample{output_id}__"
+        f"{algorithm.lower()}__{noise_level}.{algorithm.lower()}"
+    )
 
 
 def save_compressed_output(data, path):

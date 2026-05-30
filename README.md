@@ -81,6 +81,7 @@ The main run produces:
 
 `results.csv` is the final dataset for later statistical analysis. It contains:
 - `run_order`
+- `sample_id`
 - `image_name`
 - `content_block`
 - `block_sample_index`
@@ -94,7 +95,8 @@ The main run produces:
 - `response_percent`
 
 If `SAVE_OUTPUTS=1` is enabled, compressed outputs are also saved inside
-`compressed_outputs/` using the original image name plus a deterministic suffix.
+`compressed_outputs/` using the original image name plus a deterministic suffix
+that includes a row-unique consecutive `sample_id`.
 
 ## Other Flows
 

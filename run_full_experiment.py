@@ -86,6 +86,7 @@ def main():
 
     fieldnames = [
         "run_order",
+        "sample_id",
         "image_name",
         "content_block",
         "block_sample_index",
@@ -107,6 +108,7 @@ def main():
         writer.writeheader()
 
         for planned_run in run_plan:
+            sample_id = completed_runs + 1
             image_path = planned_run["image_path"]
             record = planned_run["record"]
             try:
@@ -142,6 +144,7 @@ def main():
                         / build_output_name(
                             image_path.stem,
                             record["content_block"],
+                            sample_id,
                             algorithm,
                             noise_level,
                         )
@@ -153,7 +156,8 @@ def main():
 
                 writer.writerow(
                     {
-                        "run_order": completed_runs + 1,
+                        "run_order": sample_id,
+                        "sample_id": sample_id,
                         "image_name": image_path.name,
                         "content_block": record["content_block"],
                         "block_sample_index": record["block_sample_index"],
